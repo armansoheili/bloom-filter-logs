@@ -96,8 +96,9 @@ M = 2048  # filter size in bits
 class LogBloom:
     """Ethereum-style 2048-bit bloom filter over log entries."""
 
-    def __init__(self, bits: int = 0) -> None:
+    def __init__(self, bits: int = 0, n_items: int = 0) -> None:
         self.bits = bits  # stored as a Python int bitfield
+        self.n_items = n_items  # items added (for the FPR estimate)
 
     @staticmethod
     def _item_bits(item: bytes) -> list[int]:
@@ -112,6 +113,7 @@ class LogBloom:
         """Add an address or topic (bytes) to the filter."""
         for b in self._item_bits(item):
             self.bits |= 1 << b
+        self.n_items += 1
 
     def contains(self, item: bytes) -> bool:
         """True = maybe present. False = definitely NOT present."""
@@ -129,7 +131,18 @@ class LogBloom:
         return all(t is None or self.contains(t) for t in topics)
 
     def __or__(self, other: "LogBloom") -> "LogBloom":
-        return LogBloom(self.bits | other.bits)
+        return LogBloom(self.bits | other.bits,
+                        self.n_items + other.n_items)
+
+    def estimated_false_positive_rate(self) -> float:
+        """Standard bloom-filter FPR estimate: (1 - e^(-k*n/m))^k.
+
+        k = 3 hashes per item, m = 2048 bits, n = items added.
+        """
+        import math
+        if self.n_items == 0:
+            return 0.0
+        return (1.0 - math.exp(-3.0 * self.n_items / M)) ** 3
 
     def popcount(self) -> int:
         return bin(self.bits).count("1")
@@ -171,6 +184,9 @@ def demo() -> None:
     header_bloom = tx1 | tx2
     print("header bloom matches token_b:",
           header_bloom.matches_log(token_b, [None]))
+    print("estimated false-positive rate after %d items: %.4f%%"
+          % (header_bloom.n_items,
+             100 * header_bloom.estimated_false_positive_rate()))
     print("header bloom serialization round-trip:",
           LogBloom.from_bytes(header_bloom.to_bytes()).bits
           == header_bloom.bits)
