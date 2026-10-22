@@ -134,6 +134,16 @@ class LogBloom:
         return LogBloom(self.bits | other.bits,
                         self.n_items + other.n_items)
 
+    def __ior__(self, other: "LogBloom") -> "LogBloom":
+        """In-place OR: fold another bloom into this one."""
+        self.bits |= other.bits
+        self.n_items += other.n_items
+        return self
+
+    def copy(self) -> "LogBloom":
+        """An independent copy of this filter."""
+        return LogBloom(self.bits, self.n_items)
+
     def estimated_false_positive_rate(self) -> float:
         """Standard bloom-filter FPR estimate: (1 - e^(-k*n/m))^k.
 
@@ -184,6 +194,12 @@ def demo() -> None:
     header_bloom = tx1 | tx2
     print("header bloom matches token_b:",
           header_bloom.matches_log(token_b, [None]))
+
+    # In-place fold: accumulate per-tx blooms into the block bloom.
+    block = tx1.copy()
+    block |= tx2
+    print("in-place fold equals header bloom:", block.bits == header_bloom.bits
+          and block.n_items == header_bloom.n_items)
     print("estimated false-positive rate after %d items: %.4f%%"
           % (header_bloom.n_items,
              100 * header_bloom.estimated_false_positive_rate()))
